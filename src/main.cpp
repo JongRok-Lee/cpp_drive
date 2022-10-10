@@ -1,6 +1,8 @@
 #include "cpp_drive/module.h"
 
-// Functions
+//------------------------------------------
+//             Functions 
+//------------------------------------------
 void imageCallback(const sensor_msgs::ImageConstPtr& msg);
 std::vector<float> process_image();
 std::pair<std::vector<cv::Vec4i>, std::vector<cv::Vec4i>> divide_left_right(std::vector<cv::Vec4i> &lines);
@@ -10,57 +12,85 @@ void draw_lines(std::vector<cv::Vec4i> &lines);
 void draw_rectangles(int &lpos, int &rpos, int &ma_mpos);
 void velocity_control(float &angle);
 void drive(ros::Publisher &pub, float &angle, float &speed);
-
-// Global variables
+//------------------------------------------
+//           Global variables
+//------------------------------------------
 cv_bridge::CvImagePtr cv_ptr;
-cv::Mat frame, show;
-int low_threshold = 150;
-int high_threshold = 250;
-int Width = 640;
-int Height = 480;
-int Offset = 340;
-int Gap = 40;
-int low_slope_threshold = 0, high_slope_threshold = 10;
-const int sampling_number = 20;
-float speed = 0.0;
-bool show_img = true;
-
+cv::Mat frame, show;            // frame: cv image, show: visualization image
+int low_threshold = 150;        // canny edge low threshold
+int high_threshold = 250;       // canny edge high threshold
+int Width = 640;                // Image width
+int Height = 480;               // Image Height
+int Offset = 340;               // Region of Interest (ROI) Box y1
+int Gap = 40;                   // Region of Interest (ROI) Box y2 = y1 + gap
+float slope_range = 10.0f;           // -10 <= slope range <= 10
+const int sampling_number = 20; // sampling number of Moving Average filter
+float speed = 0.0;              // Initial speed of Xycar
+bool show_img = true;           // Visualiation mode (ON / OFF)
+//------------------------------------------
+//             Main Function
+//------------------------------------------
 int main(int argc, char** argv) {
 
-    ros::init(argc, argv, "test");
-    ros::NodeHandle nh;
-    ros::Publisher pub = nh.advertise<xycar_msgs::xycar_motor>("xycar_motor", 1000);
-    ros::Subscriber sub = nh.subscribe("/usb_cam/image_raw/", 1, imageCallback);
+    ros::init(argc, argv, "test");      // ROS init function
+    ros::NodeHandle nh;                 // ROS nodehandle funtion 
+    ros::Publisher pub =                // ROS Publischer Node
+        nh.advertise<xycar_msgs::xycar_motor>("xycar_motor", 1000);
+    ros::Subscriber sub =               // ROS Subscriber Node
+        nh.subscribe("/usb_cam/image_raw/", 1, imageCallback);
     
-    MovingAverage ma(sampling_number);
-    float kp, ki, kd;
-    ros::param::get("kp", kp);
-    ros::param::get("ki", ki);
-    ros::param::get("kd", kd);
-    ros::param::get("show_img", show_img);
-    std::cout << "Kp: " << kp << "\tKi: " << ki << "\tKd: " << kd << "\tshow_img: " << show_img <<"\n";
-    PID pid(kp, ki, kd);
 
-    int lpos, rpos, mpos, ma_pos, cte;
-    float l_slope, r_slope, steer_angle;
+    MovingAverage ma(sampling_number);      // Moving Average Filter Class
+    float kp, ki, kd;                       // PID gain Setting
+    ros::param::get("kp", kp);              // Get P gain from launch argument
+    ros::param::get("ki", ki);              // Get I gain from launch argument
+    ros::param::get("kd", kd);              // Get D gain from launch argument
+    ros::param::get("show_img", show_img);  // Get Visualization mode from launch argument
+
+    std::cout << "Kp: " << kp               // Print PID Gain and Visualization mode
+              << "\tKi: " << ki
+              << "\tKd: " << kd
+              << "\tshow_img: " << show_img << std::endl;
+
+    PID pid(kp, ki, kd);                    // PID Class
+
+    int lpos, rpos,                         // lpos : Left Lane position, rpos : Right Lane position
+        mpos, ma_pos, cte;                  // mpos : middle position of the Lanes, ma_pos : Filtered mpos
+    float l_slope, r_slope,                 // l_slope : slope of Left Lane, r_slope : slope of Right Lane, 
+        steer_angle;                        // Steering angle Value
+
+    // Driving Start (Get Camera Image)    
     while (ros::ok()) {
-        ros::spinOnce();
-        if (frame.cols != 640) {
+        ros::spinOnce();                                    // Get Camera frame once
+
+        if (frame.cols != 640) {                            // Wait for camera image to be obtained
             continue;
         }
 
-        std::vector<float> pos_and_slope = process_image();
-        lpos = static_cast<int>(pos_and_slope[0]), rpos = static_cast<int>(pos_and_slope[1]);
-        l_slope = pos_and_slope[2], r_slope = pos_and_slope[3];
-        mpos = (lpos + rpos) * 0.5;
-        ma.add_sample(mpos);
-        ma_pos = ma.get_wmm();
+        // Step 1: Image Processing
+        std::vector<float> pos_and_slope = process_image(); // Get each Position & Slope of the Left and Right Lanes
+        lpos = static_cast<int>(pos_and_slope[0]);
+        rpos = static_cast<int>(pos_and_slope[1]);
+        l_slope = pos_and_slope[2];
+        r_slope = pos_and_slope[3];
 
-        cte = ma_pos - Width * 0.5;
+        // Step 2: Calculate the center of the Lanes
+        mpos = (lpos + rpos) * 0.5;                         // Mid = (Left + Right) / 2
+        ma.add_sample(mpos);                                // Middle Position Filtering (1/2)
+        ma_pos = ma.get_wmm();                              // Middle Position Filtering (2/2)
+
+        // Step 3: Get the error of PID control
+        cte = ma_pos - Width * 0.5;                         // e = current middle lane position - Center of the image
+
+        // Step 4: Get the optimal steering angle with PID Controller
         steer_angle = pid.pid_control(cte);
+        steer_angle = std::max(-50.0f,                      // -50 <= angle <= +50
+            std::min(steer_angle, 50.0f));
 
-        steer_angle = std::max(-50.0f, std::min(steer_angle, 50.0f));
+        // Step 5: Get the optimal Xycar speed with steering angle
         velocity_control(steer_angle);
+
+        // Step 6: Publish the Speed and Steering angle 
         drive(pub, steer_angle, speed);
 
         // Visualization
@@ -69,60 +99,65 @@ int main(int argc, char** argv) {
             cv::imshow("show", show);
             cv::waitKey(1);
         }
-        
 
-        std::cout << "l_pos: " << pos_and_slope[0] << "\tr_pos: " << pos_and_slope[1] << "\tspeed: " << speed << "\tangle: " << steer_angle << "\n";
+        // std::cout << "l_pos: " << pos_and_slope[0] << "\tr_pos: " << pos_and_slope[1] << "\tspeed: " << speed << "\tangle: " << steer_angle << "\n";
     }
 
     return 0;
 }
 
+//------------------------------------------
+//      Image Callback Function
+//------------------------------------------
 void imageCallback(const sensor_msgs::ImageConstPtr& msg)
 {
-  cv_ptr = cv_bridge::toCvCopy(msg, sensor_msgs::image_encodings::BGR8);
-  frame = cv_ptr->image;
+    // Get Image pointer
+    cv_ptr = cv_bridge::toCvCopy(msg, sensor_msgs::image_encodings::BGR8);
+    // Update the image
+    frame = cv_ptr->image;
 }
 
+//------------------------------------------
+//      Image Processing Function
+//------------------------------------------
 std::vector<float> process_image()
 {
     std::vector<float> pos_and_slope;
-    // gray
+    // Make gray Image for Canny Edge Detection
     cv::Mat gray;
     cv::cvtColor(frame, gray, cv::COLOR_BGR2GRAY);
     
-    // canny edge
+    // Get ROI Canny Edge image
     cv::Mat canny;
     cv::Canny(gray, canny, low_threshold, high_threshold);
-
     cv::Mat roi = canny(cv::Rect(0 , Offset, Width, Gap));
 
-    // HoughLinesP
-    std::vector<cv::Vec4i>all_lines;
+    // Get lines with HoughLinesP funtion
+    std::vector<cv::Vec4i> all_lines;
     cv::HoughLinesP(roi, all_lines, 1, M_PI/180, 40, 35, 10);
-    
-    // divide left, right lines
-    if (all_lines.size() == 0) {
-        for (int i = 0; i < 4; ++i) pos_and_slope.push_back(0.0);
-        return pos_and_slope;
+    if (all_lines.size() == 0) {                                    // If there is not line, return zero vector. 
+        return std::vector<float>(4, 0.0f);
     }
-    std::vector<cv::Vec4i> left_lines, right_lines;
-    left_lines = divide_left_right(all_lines).first;
-    right_lines = divide_left_right(all_lines).second;
 
-    // Draw line
+    // Divide left and right lines
+    std::pair<std::vector<cv::Vec4i>, std::vector<cv::Vec4i>> left_right_lines = divide_left_right(all_lines);
+    std::vector<cv::Vec4i> left_lines = left_right_lines.first;
+    std::vector<cv::Vec4i> right_lines = left_right_lines.second;
+
+    // Draw lines for visualization
     if (show_img == true) {
         frame.copyTo(show);
         draw_lines(left_lines);
         draw_lines(right_lines);
     }
 
-    // get center of lines
-    int lpos, rpos;
-    float l_slope, r_slope;
-    lpos = get_line_pos(left_lines, true, false).first;
-    rpos = get_line_pos(right_lines, false, true).first;
-    l_slope = get_line_pos(left_lines, true, false).second;
-    r_slope = get_line_pos(right_lines, false, true).second;
+    // Get postion and slope values
+    std::pair<int, float> lpos_lslope = get_line_pos(left_lines, true, false);
+    std::pair<int, float> rpos_rslope = get_line_pos(right_lines, false, true);
+    int lpos = lpos_lslope.first;
+    int rpos = rpos_rslope.first;
+    float l_slope = lpos_lslope.second;
+    float r_slope = rpos_rslope.second;
 
     pos_and_slope.push_back(static_cast<float>(lpos));
     pos_and_slope.push_back(static_cast<float>(rpos));
@@ -131,48 +166,60 @@ std::vector<float> process_image()
     return pos_and_slope;
 }
 
+//------------------------------------------
+//      Line Division Function
+//------------------------------------------
 std::pair<std::vector<cv::Vec4i>, std::vector<cv::Vec4i>> divide_left_right(std::vector<cv::Vec4i> &lines)
 {
+    // Step 1. Filtering the lines with slope value
     std::vector<cv::Vec4i> new_lines;
     std::vector<float> slopes;
     int x1, y1, x2, y2;
     float slope;
+
+    // Get x,y values from lines
     for(auto &line : lines) {
         x1 = line[0], y1 = line[1];
         x2 = line[2], y2 = line[3];
-        if (x2 - x1 == 0) {
+        if (x2 - x1 == 0) {                 // If x1 = x2, slope = 0.
             slope = 0.0;
         }
-        else {
+        else {                              // Else, slope = (y2 - y1) / (x2 - x1) 
             slope = static_cast<float>(y2 - y1) / static_cast<float>(x2 - x1);
         }
 
-        if (std::abs(slope) > low_slope_threshold && std::abs(slope) < high_slope_threshold) {
+        if (std::abs(slope) <= slope_range) {// If -10 <= slope <= 10, push back.
             slopes.push_back(slope);
             new_lines.push_back(line);
         }
     }
 
-    // divide lines left to right
+    // Step 2. Divide left and right lines
     std::vector<cv::Vec4i> left_lines, right_lines;
     float left_x_sum = 0.0, right_x_sum = 0.0;
     float left_x_avg, right_x_avg;
     cv::Vec4i line;
-    for (int j = 0; j < slopes.size(); ++j) {
+    
+    //Get x, y values from filtered line (new_lines) and Divide the lines.
+    for (int j = 0; j < new_lines.size(); ++j) {
         line = new_lines[j];
         slope = slopes[j];
         x1 = line[0], y1 = line[1];
         x2 = line[2], y2 = line[3];
+
+        // If slope < 0 (line shape : /), left line. 
         if (slope < 0) {
             left_lines.push_back(line);
             left_x_sum += static_cast<float>(x1 + x2) * 0.5;
         }
+        // If slope >= 0 (line shape : \), right line.
         else {
             right_lines.push_back(line);
             right_x_sum += static_cast<float>(x1 + x2) * 0.5;
         }
     }
 
+    // Step 3. Exception handling (No line)
     if (left_lines.size() != 0 && right_lines.size() != 0) {
         left_x_avg = left_x_sum / left_lines.size();
         right_x_avg = right_x_sum / right_lines.size();
@@ -185,6 +232,7 @@ std::pair<std::vector<cv::Vec4i>, std::vector<cv::Vec4i>> divide_left_right(std:
     std::pair<std::vector<cv::Vec4i>, std::vector<cv::Vec4i>> left_right_lines(left_lines, right_lines);
     return left_right_lines;
 }
+
 
 std::pair<int, float> get_line_pos(std::vector<cv::Vec4i> &lines, bool left, bool right)
 {   
