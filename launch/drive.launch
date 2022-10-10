@@ -1,0 +1,26 @@
+<launch>
+    <arg name="kp" default="0.36" />
+    <arg name="ki" default="0.0006" />
+    <arg name="kd" default="0.08" />
+    <arg name="show_img" default="true" />
+    <param name="kp" value="$(arg kp)"/>
+    <param name="ki" value="$(arg ki)"/>
+    <param name="kd" value="$(arg kd)"/>
+    <param name="show_img" value="$(arg show_img)"/>
+    <node name="test" pkg="cpp_drive" type="drive" output="screen"/>
+    
+
+    <!-- usb_cam -->
+    <!-- <node name="usb_cam" pkg="usb_cam" type="usb_cam_node" output="screen" >
+    <param name="video_device" value="/dev/videoCAM" />
+    <param name="image_width" value="640" />
+    <param name="image_height" value="480" />
+    <param name="pixel_format" value="yuyv" />
+    <param name="camera_frame_id" value="usb_cam" />
+    <param name="exposure" value="80" />
+    <param name="io_method" value="mmap"/>
+    </node> -->
+
+    <!-- ROS bag -->
+    <node name="rosbag" pkg="rosbag" type="play" args="/root/xycar_ws/src/test/track.bag" output="screen"/>
+</launch>
