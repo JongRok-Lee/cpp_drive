@@ -23,10 +23,16 @@ int Width = 640;                // Image width
 int Height = 480;               // Image Height
 int Offset = 340;               // Region of Interest (ROI) Box y1
 int Gap = 40;                   // Region of Interest (ROI) Box y2 = y1 + gap
-float slope_range = 10.0f;           // -10 <= slope range <= 10
+float slope_range = 10.0f;      // -10 <= slope range <= 10
 const int sampling_number = 20; // sampling number of Moving Average filter
 float speed = 0.0;              // Initial speed of Xycar
+float max_speed = 40.0f;        // Max speed of Xycar
+float min_speed = 15.0f;        // Min speed of Xycar
 bool show_img = true;           // Visualiation mode (ON / OFF)
+cv::Scalar cv_red(0, 0, 255);   // OpenCV Color Red
+cv::Scalar cv_green(0, 255, 0); // OpenCV Color Green
+cv::Scalar cv_blue(255, 0, 0);  // OpenCV Color Blue
+
 //------------------------------------------
 //             Main Function
 //------------------------------------------
@@ -233,16 +239,19 @@ std::pair<std::vector<cv::Vec4i>, std::vector<cv::Vec4i>> divide_left_right(std:
     return left_right_lines;
 }
 
-
+//------------------------------------------
+//      Get Lane Position Function
+//------------------------------------------
 std::pair<int, float> get_line_pos(std::vector<cv::Vec4i> &lines, bool left, bool right)
 {   
-    float pos;
-
+    // Step 1. get m & b values (y = mx + b)
     std::pair<float, float> m_and_b = get_line_params(lines);
-    float m = m_and_b.first, b = m_and_b.second;
+    float m = m_and_b.first;
+    float b = m_and_b.second;
 
-    float y;
-    if (m == 0.0 && b == 0.0) {
+    // Step 2. Get Lane position
+    float y, pos;
+    if (m == 0.0 && b == 0.0) {                 // If there is no line, pos = 0 or 640.
         if (left == true) {
             pos = 0.0;
         }
@@ -250,7 +259,7 @@ std::pair<int, float> get_line_pos(std::vector<cv::Vec4i> &lines, bool left, boo
             pos = static_cast<float>(Width);
         }
     }
-    else {
+    else {                                      // Else, y = mx + b --> x = (y - b) / m
         y = static_cast<float>(Gap) * 0.5;
         pos = (y - b) / m;
     }
@@ -258,17 +267,20 @@ std::pair<int, float> get_line_pos(std::vector<cv::Vec4i> &lines, bool left, boo
     return pos_and_m;
 }
 
+//------------------------------------------
+//      Get Line Parameter (m & b) Function
+//------------------------------------------
 std::pair<float, float> get_line_params(std::vector<cv::Vec4i> &lines)
 {
-    std::pair<float, float> m_and_b;
-    float x_sum = 0.0, y_sum = 0.0, m_sum = 0.0;
     int size = lines.size();
+    // Step 1. Exception handling (No lines)
     if (size == 0) {
-        m_and_b.first = 0.0, m_and_b.second = 0.0;
-        return m_and_b;
+        return std::pair<float, float>(0.0f, 0.0f);
     }
 
+    // Step 2. Get sum(m), sum(x), and sum(y)
     int x1, y1, x2, y2;
+    float x_sum = 0.0, y_sum = 0.0, m_sum = 0.0;
     for (auto &line : lines) {
         x1 = line[0], y1 = line[1];
         x2 = line[2], y2 = line[3];
@@ -278,21 +290,24 @@ std::pair<float, float> get_line_params(std::vector<cv::Vec4i> &lines)
         m_sum += static_cast<float>(y2 - y1) / static_cast<float>(x2 - x1);
     }
 
+    // Step 3. Get m and b
     float x_avg, y_avg, m, b;
     x_avg = x_sum / static_cast<float>(size * 2);
     y_avg = y_sum / static_cast<float>(size * 2);
     m = m_sum / static_cast<float>(size);
     b = y_avg - m * x_avg;
 
-    m_and_b.first = m, m_and_b.second = b;
+    std::pair<float, float> m_and_b(m, b);
     return m_and_b;
 }
 
+//------------------------------------------
+//      Line Drawing Function
+//------------------------------------------
 void draw_lines(std::vector<cv::Vec4i> &lines)
 {
     cv::Point2i pt1, pt2;
     cv::Scalar color;
-
     for (auto &line : lines) {
         pt1 = cv::Point2i(line[0], line[1] + Offset);
         pt2 = cv::Point2i(line[2], line[3] + Offset);
@@ -306,32 +321,41 @@ void draw_lines(std::vector<cv::Vec4i> &lines)
     }
 }
 
+//------------------------------------------
+//      Rectangle Drawing Function
+//------------------------------------------
 void draw_rectangles(int &lpos, int &rpos, int &ma_mpos)
 {
-    cv::rectangle(show, cv::Point(lpos - 5, 15 + Offset), cv::Point(lpos + 5, 25 + Offset), cv::Scalar(0, 255, 0), 2);
-    cv::rectangle(show, cv::Point(rpos - 5, 15 + Offset), cv::Point(rpos + 5, 25 + Offset), cv::Scalar(0, 255, 0), 2);
-    cv::rectangle(show, cv::Point(ma_mpos-5, 15 + Offset), cv::Point(ma_mpos+5, 25 + Offset), cv::Scalar(0, 255, 0), 2);
-    cv::rectangle(show, cv::Point(315, 15 + Offset), cv::Point(325, 25 + Offset), cv::Scalar(0, 0, 255), 2);
+    // lpos, rpos = Green, mpos = red, center = blue
+    cv::rectangle(show, cv::Point(lpos - 5, 15 + Offset), cv::Point(lpos + 5, 25 + Offset), cv_green, 2);
+    cv::rectangle(show, cv::Point(rpos - 5, 15 + Offset), cv::Point(rpos + 5, 25 + Offset), cv_green, 2);
+    cv::rectangle(show, cv::Point(ma_mpos-5, 15 + Offset), cv::Point(ma_mpos+5, 25 + Offset), cv_red, 2);
+    cv::rectangle(show, cv::Point(315, 15 + Offset), cv::Point(325, 25 + Offset), cv_blue, 2);
 }
 
+//------------------------------------------
+//  Acceleration and Deceleration Function (Optional)
+//------------------------------------------
 void velocity_control(float &angle)
 {
     if (std::abs(angle) > 30) {
         speed -= 0.1;
-        speed = std::max(speed, 15.0f);
+        speed = std::max(speed, min_speed);
     }
     else {
         speed += 0.05;
-        speed = std::min(speed, 50.0f);
+        speed = std::min(speed, max_speed);
     }
 }
 
+//------------------------------------------
+//  Publish Function (Optional)
+//------------------------------------------
 void drive(ros::Publisher &pub, float &angle, float &speed)
 {
     xycar_msgs::xycar_motor msg;
     msg.angle = std::round(angle);
     msg.speed = std::round(speed);
-
 
     pub.publish(msg);
 }
