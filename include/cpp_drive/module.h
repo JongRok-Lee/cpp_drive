@@ -5,8 +5,8 @@
 #include <deque>
 #include <numeric>
 #include <ros/ros.h>
-#include <cv_bridge/cv_bridge.h>
-#include <opencv2/opencv.hpp>
+// #include <cv_bridge/cv_bridge.h>
+#include "opencv2/opencv.hpp"
 #include <xycar_msgs/xycar_motor.h>
 #include <sensor_msgs/Image.h>
 
