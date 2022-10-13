@@ -3,7 +3,8 @@
 //------------------------------------------
 //             Functions 
 //------------------------------------------
-void imageCallback(const sensor_msgs::ImageConstPtr& msg);
+// void imageCallback(const sensor_msgs::ImageConstPtr& msg);
+void imageCallback(const sensor_msgs::Image& msg);
 std::vector<float> process_image();
 std::pair<std::vector<cv::Vec4i>, std::vector<cv::Vec4i>> divide_left_right(std::vector<cv::Vec4i> &lines);
 std::pair<int, float> get_line_pos(std::vector<cv::Vec4i> &lines, bool left, bool right);
@@ -115,12 +116,14 @@ int main(int argc, char** argv) {
 //------------------------------------------
 //      Image Callback Function
 //------------------------------------------
-void imageCallback(const sensor_msgs::ImageConstPtr& msg)
+void imageCallback(const sensor_msgs::Image& msg)
 {
     // Get Image pointer
-    cv_ptr = cv_bridge::toCvCopy(msg, sensor_msgs::image_encodings::BGR8);
+//     cv_ptr = cv_bridge::toCvCopy(msg, sensor_msgs::image_encodings::BGR8);
     // Update the image
-    frame = cv_ptr->image;
+//     frame = cv_ptr->image;
+    cv::Mat src = cv::Mat(480, 640, CV_8UC3, const_cast<uchar *>(&msg.data[0]), msg.step);
+    cv::cvtColor(src, frame, cv::COLOR_RGB2BGR);
 }
 
 //------------------------------------------
