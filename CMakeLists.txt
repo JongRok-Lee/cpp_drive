@@ -2,14 +2,14 @@ cmake_minimum_required(VERSION 3.0.2)
 project(cpp_drive)
 
 find_package(catkin REQUIRED COMPONENTS
-  cv_bridge
+  # cv_bridge
   roscpp
   sensor_msgs
   std_msgs
   xycar_msgs
-  OpenCV
+  #OpenCV
 )
-
+find_package(OpenCV 4.5.5 REQUIRED PATHS ~/OpenCV4/install/lib/cmake/opencv4)
 
 catkin_package(
  INCLUDE_DIRS include
