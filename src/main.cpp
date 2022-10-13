@@ -16,7 +16,7 @@ void drive(ros::Publisher &pub, float &angle, float &speed);
 //------------------------------------------
 //           Global variables
 //------------------------------------------
-cv_bridge::CvImagePtr cv_ptr;
+// cv_bridge::CvImagePtr cv_ptr;
 cv::Mat frame, show;            // frame: cv image, show: visualization image
 int low_threshold = 150;        // canny edge low threshold
 int high_threshold = 250;       // canny edge high threshold
